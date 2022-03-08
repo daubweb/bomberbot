@@ -4,7 +4,7 @@ import pickle
 from typing import List
 
 import events as e
-from .callbacks import state_to_features
+from .callbacks import state_to_features, ACTIONS
 
 # This is only an example!
 Transition = namedtuple('Transition',
@@ -17,6 +17,8 @@ RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 # Events
 PLACEHOLDER_EVENT = "PLACEHOLDER"
 
+GAMMA = 0.1
+
 
 def setup_training(self):
     """
@@ -28,7 +30,7 @@ def setup_training(self):
     """
     # Example: Setup an array that will note transition tuples
     # (s, a, r, s')
-    self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
+    #self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
@@ -48,15 +50,23 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     :param new_game_state: The state the agent is in now.
     :param events: The events that occurred when going from  `old_game_state` to `new_game_state`
     """
-    self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
+    #self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
     # Idea: Add your own events to hand out rewards
-    if ...:
-        events.append(PLACEHOLDER_EVENT)
+    #if ...:
+    #    events.append(PLACEHOLDER_EVENT)
 
     # state_to_features is defined in callbacks.py
-    self.transitions.append(Transition(state_to_features(old_game_state), self_action, state_to_features(new_game_state), reward_from_events(self, events)))
+    #self.transitions.append(Transition(state_to_features(old_game_state), self_action, state_to_features(new_game_state), reward_from_events(self, events)))
+    if old_game_state is None:
+        return None
+    previous_state = tuple(state_to_features(old_game_state))
+    new_state = tuple(state_to_features(new_game_state))
+    reward = reward_from_events(self, events)
+    takenAction = ACTIONS.index(self_action)
 
+    previousRewardEstimation = self.q_table[previous_state + (takenAction,)]
+    self.q_table[previous_state + (takenAction,)] = (previousRewardEstimation + (GAMMA*reward)) / (1+GAMMA)
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """
@@ -71,12 +81,12 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     :param self: The same object that is passed to all of your callbacks.
     """
-    self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
-    self.transitions.append(Transition(state_to_features(last_game_state), last_action, None, reward_from_events(self, events)))
+    #self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
+    #self.transitions.append(Transition(state_to_features(last_game_state), last_action, None, reward_from_events(self, events)))
 
     # Store the model
-    with open("my-saved-model.pt", "wb") as file:
-        pickle.dump(self.model, file)
+    #with open("my-saved-model.pt", "wb") as file:
+    #    pickle.dump(self.model, file)
 
 
 def reward_from_events(self, events: List[str]) -> int:
@@ -89,7 +99,8 @@ def reward_from_events(self, events: List[str]) -> int:
     game_rewards = {
         e.COIN_COLLECTED: 1,
         e.KILLED_OPPONENT: 5,
-        PLACEHOLDER_EVENT: -.1  # idea: the custom event is bad
+        e.INVALID_ACTION: -10,
+        e.KILLED_SELF: -100,
     }
     reward_sum = 0
     for event in events:
