@@ -15,7 +15,7 @@ def setup(self):
 def act(self, game_state: dict) -> str:
     #get maximum probability
     #sometimes choose random action
-    if np.random.rand(1) > e:
+    if np.random.rand(1) < e:
         #take random action
         return np.random.choice(ACTIONS)
     else:

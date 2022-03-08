@@ -2,6 +2,8 @@ from collections import namedtuple, deque
 
 import pickle
 from typing import List
+import matplotlib.pyplot as plt
+import numpy as np
 
 import events as e
 from .callbacks import state_to_features, ACTIONS
@@ -31,7 +33,9 @@ def setup_training(self):
     # Example: Setup an array that will note transition tuples
     # (s, a, r, s')
     #self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
-
+    self.counter = 0
+    self.totalReward = 0
+    self.previousRewards = []
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
     """
@@ -64,6 +68,10 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     new_state = tuple(state_to_features(new_game_state))
     reward = reward_from_events(self, events)
     takenAction = ACTIONS.index(self_action)
+    if e.KILLED_SELF not in events and e.GOT_KILLED not in events:
+        reward += 1
+
+    self.totalReward += reward
 
     previousRewardEstimation = self.q_table[previous_state + (takenAction,)]
     self.q_table[previous_state + (takenAction,)] = (previousRewardEstimation + (GAMMA*reward)) / (1+GAMMA)
@@ -87,7 +95,13 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     # Store the model
     #with open("my-saved-model.pt", "wb") as file:
     #    pickle.dump(self.model, file)
-
+    print("total reward: ", self.totalReward)
+    self.previousRewards.append(self.totalReward)
+    self.totalReward = 0
+    self.counter += 1
+    if (self.counter % 10000 == 0):
+        plt.plot(np.convolve(np.array(self.previousRewards), np.ones(100)/100, mode='valid'))
+        plt.show()
 
 def reward_from_events(self, events: List[str]) -> int:
     """
