@@ -7,6 +7,8 @@ name = "pypi"
 example = "*"
 keras = "*"
 tensorflow = "*"
+matplotlib = "*"
+jupyterlab = "*"
 
 [dev-packages]
 

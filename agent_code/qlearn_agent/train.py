@@ -1,13 +1,14 @@
 from collections import namedtuple, deque
-from keras import layers, models
 
 import pickle
 from typing import List
-import matplotlib.pyplot as plt
-import numpy as np
+
+import keras
+from keras import layers
+from tensorflow import optimizers
 
 import events as e
-from .callbacks import state_to_features, ACTIONS
+from .callbacks import state_to_features
 
 # This is only an example!
 Transition = namedtuple('Transition',
@@ -20,7 +21,30 @@ RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 # Events
 PLACEHOLDER_EVENT = "PLACEHOLDER"
 
-GAMMA = 0.1
+seed = 42
+gamma = 0.99
+epsilon = 1.0
+epsilon_min = 0.1
+epsilon_max = 1.0
+
+epsilon_interval = (epsilon_max - epsilon_min)
+batch_size = 32
+max_steps_per_episode = 10000
+
+num_actions = 6
+
+def create_model():
+    inputs = layers.Input(shape=(84,84,4))
+    layer1 = layers.Conv2D(32, 8, strides=4, activation="relu")(inputs)
+    layer2 = layers.Conv2D(64, 4, strides=2, activation="relu")(layer1)
+    layer3 = layers.Conv2D(64, 3, strides=1, activation="relu")(layer2)
+
+    layer4 = layers.Flatten()(layer3)
+
+    layer5 = layers.Dense(512, activation="relu")(layer4)
+    action = layers.Dense(num_actions, activation="linear")(layer5)
+
+    return keras.Model(inputs=inputs, outputs=action)
 
 
 def setup_training(self):
@@ -33,11 +57,35 @@ def setup_training(self):
     """
     # Example: Setup an array that will note transition tuples
     # (s, a, r, s')
-    #self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
-    self.counter = 0
-    self.totalReward = 0
-    self.previousRewards = []
+    self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
+    model = create_model()
+    model_target = create_model()
 
+    optimizer = optimizers.Adam(learning_rate=0.00025, clipnorm=1.0)
+
+    # Experience replay buffers
+    action_history = []
+    state_history = []
+    state_next_history = []
+    rewards_history = []
+    done_history = []
+    episode_reward_history = []
+    running_reward = 0
+    episode_count = 0
+    frame_count = 0
+    # Number of frames to take random action and observe output
+    epsilon_random_frames = 50000
+    # Number of frames for exploration
+    epsilon_greedy_frames = 1000000.0
+    # Maximum replay length
+    # Note: The Deepmind paper suggests 1000000 however this causes memory issues
+    max_memory_length = 100000
+    # Train the model after 4 actions
+    update_after_actions = 4
+    # How often to update the target network
+    update_target_network = 10000
+    # Using huber loss for stability
+    loss_function = keras.losses.Huber()
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
@@ -57,27 +105,15 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     :param new_game_state: The state the agent is in now.
     :param events: The events that occurred when going from  `old_game_state` to `new_game_state`
     """
-    #self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
+    self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
     # Idea: Add your own events to hand out rewards
-    #if ...:
-    #    events.append(PLACEHOLDER_EVENT)
+    # if ...:
+    #     events.append(PLACEHOLDER_EVENT)
 
     # state_to_features is defined in callbacks.py
-    #self.transitions.append(Transition(state_to_features(old_game_state), self_action, state_to_features(new_game_state), reward_from_events(self, events)))
-    if old_game_state is None:
-        return None
-    previous_state = tuple(state_to_features(old_game_state))
-    new_state = tuple(state_to_features(new_game_state))
-    reward = reward_from_events(self, events)
-    takenAction = ACTIONS.index(self_action)
-    if e.KILLED_SELF not in events and e.GOT_KILLED not in events:
-        reward += 1
+    self.transitions.append(Transition(state_to_features(old_game_state), self_action, state_to_features(new_game_state), reward_from_events(self, events)))
 
-    self.totalReward += reward
-
-    previousRewardEstimation = self.q_table[previous_state + (takenAction,)]
-    self.q_table[previous_state + (takenAction,)] = (previousRewardEstimation + (GAMMA*reward)) / (1+GAMMA)
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
     """
@@ -92,19 +128,13 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     :param self: The same object that is passed to all of your callbacks.
     """
-    #self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
-    #self.transitions.append(Transition(state_to_features(last_game_state), last_action, None, reward_from_events(self, events)))
+    self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
+    self.transitions.append(Transition(state_to_features(last_game_state), last_action, None, reward_from_events(self, events)))
 
     # Store the model
-    #with open("my-saved-model.pt", "wb") as file:
-    #    pickle.dump(self.model, file)
-    print("total reward: ", self.totalReward)
-    self.previousRewards.append(self.totalReward)
-    self.totalReward = 0
-    self.counter += 1
-    if (self.counter % 10000 == 0):
-        plt.plot(np.convolve(np.array(self.previousRewards), np.ones(100)/100, mode='valid'))
-        plt.show()
+    with open("my-saved-model.pt", "wb") as file:
+        pickle.dump(self.model, file)
+
 
 def reward_from_events(self, events: List[str]) -> int:
     """
@@ -114,18 +144,18 @@ def reward_from_events(self, events: List[str]) -> int:
     certain behavior.
     """
     game_rewards = {
-        e.COIN_COLLECTED: 10,
+        e.COIN_COLLECTED: 1,
         e.KILLED_OPPONENT: 50,
         e.INVALID_ACTION: -2,
-        e.KILLED_SELF: -300,
-        e.SURVIVED_ROUND: 200,
         e.MOVED_LEFT: -1,
-        e.MOVED_RIGHT: -1,
         e.MOVED_UP: -1,
+        e.MOVED_RIGHT: -1,
         e.MOVED_DOWN: -1,
-        e.BOMB_DROPPED: -1,
+        e.CRATE_DESTROYED: 2,
+        e.KILLED_SELF: -100,
         e.GOT_KILLED: -100
     }
+
     reward_sum = 0
     for event in events:
         if event in game_rewards:
