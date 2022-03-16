@@ -10,8 +10,8 @@ lastSavedEpoch = 0
 
 def setup(self):
     #                       5 features, taken Action, reward
-    #self.q_table = np.zeros((3, 3, 3, 3, 3, 50, 50, 6))
-    self.q_table = np.load("./q_table.npy")
+    self.q_table = np.zeros((3, 3, 3, 3, 3, 50, 50, 6))
+    #self.q_table = np.load("./q_table.npy")
     print(self.q_table)
 
 
