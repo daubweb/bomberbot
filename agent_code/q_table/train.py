@@ -40,7 +40,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     self.counter += 1
     self.all_coins_collected.append(100 * ( 1- (len(last_game_state["coins"]) / 50)))
 
-    if (self.counter % 2000 == 0):
+    if (self.counter % 4000 == 0):
         plot, axs = plt.subplots(2)
         axs[0].plot(np.convolve(np.array(self.previousRewards), np.ones(100)/100, mode='valid'))
         axs[0].set_title("Average Reward per Round")
