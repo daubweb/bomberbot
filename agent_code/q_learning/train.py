@@ -1,115 +1,63 @@
-from collections import namedtuple, deque
-
 import pickle
+from collections import namedtuple
 from typing import List
 
 import keras
-from keras import layers
-from tensorflow import optimizers
-
 import numpy as np
-import tensorflow as tf
+from keras import layers
 from tensorflow import keras
-
+import tensorflow as tf
 
 import events as e
 from .callbacks import state_to_features
 
-# This is only an example!
-Transition = namedtuple('Transition',
-                        ('state', 'action', 'next_state', 'reward'))
-
-# Hyper parameters -- DO modify
-TRANSITION_HISTORY_SIZE = 3  # keep only ... last transitions
-RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
-
-
-optimizer = keras.optimizers.Adam(learning_rate=0.00025, clipnorm=1.0)
-
 # Experience replay buffers
-action_history = []
-state_history = []
-state_next_history = []
-rewards_history = []
-done_history = []
-episode_reward_history = []
-running_reward = 0
-episode_count = 0
 frame_count = 0
-# Number of frames to take random action and observe output
-epsilon_random_frames = 50000
-# Number of frames for exploration
-epsilon_greedy_frames = 1000000.0
-# Maximum replay length
-# Note: The Deepmind paper suggests 1000000 however this causes memory issues
-max_memory_length = 100000
-# Train the model after 4 actions
-update_after_actions = 4
-# How often to update the target network
-update_target_network = 10000
-# Using huber loss for stability
-loss_function = keras.losses.Huber()
-
-
-epsilon_interval = (epsilon_max - epsilon_min)
-batch_size = 32
-max_steps_per_episode = 10000
-
+episode_count = 0
 num_actions = 6
 
-def create_model():
-    inputs = layers.Input(shape=(84,84,4))
-    layer1 = layers.Conv2D(32, 8, strides=4, activation="relu")(inputs)
-    layer2 = layers.Conv2D(64, 4, strides=2, activation="relu")(layer1)
-    layer3 = layers.Conv2D(64, 3, strides=1, activation="relu")(layer2)
 
-    layer4 = layers.Flatten()(layer3)
-
-    layer5 = layers.Dense(512, activation="relu")(layer4)
-    action = layers.Dense(num_actions, activation="linear")(layer5)
-
+def create_q_model(self):
+    inputs = layers.Input(shape=(1450, 1))
+    layer_1 = layers.Dense(250, activation="relu")(inputs)
+    layer_2 = layers.Dense(10, activation="relu")(layer_1)
+    action = layers.Dense(num_actions, activation="linear")(layer_2)
     return keras.Model(inputs=inputs, outputs=action)
 
 
 def setup_training(self):
-    """
-    Initialise self for training purpose.
+    self.seed = 42
+    self.gamma = 0.99  # Discount factor for past rewards
+    self.epsilon = 1.0  # Epsilon greedy parameter
+    self.epsilon_min = 0.1  # Minimum epsilon greedy parameter
+    self.epsilon_max = 1.0  # Maximum epsilon greedy parameter
+    self.epsilon_interval = (
+            self.epsilon_max - self.epsilon_min
+    )  # Rate at which to reduce chance of random action being taken
+    self.batch_size = 32  # Size of batch taken from replay buffer
+    self.max_steps_per_episode = 1000
 
-    This is called after `setup` in callbacks.py.
+    self.optimizer = keras.optimizers.Adam(learning_rate=0.00025, clipnorm=1.0)
+    self.action_history = []
+    self.state_history = []
+    self.state_next_history = []
+    self.rewards_history = []
+    self.done_history = []
+    self.episode_reward_history = []
+    self.running_reward = 0
+    self.epsilon_random_frames = 50000
+    self.epsilon_greedy_frames = 1000000.0
+    self.max_memory_length = 100000
+    self.update_after_actions = 4
+    self.update_target_network = 10000
+    self.loss_function = keras.losses.Huber()
 
-    :param self: This object is passed to all callbacks and you can set arbitrary values.
-    """
-    # Example: Setup an array that will note transition tuples
-    # (s, a, r, s')
-    self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
-    self.model = create_model()
-    self.model_target = create_model()
+    self.frame_count = 0
+    self.episode_count = 0
+    self.episode_reward = 0
 
-    self.optimizer = optimizers.Adam(learning_rate=0.00025, clipnorm=1.0)
-
-    # Experience replay buffers
-    action_history = []
-    state_history = []
-    state_next_history = []
-    rewards_history = []
-    done_history = []
-    episode_reward_history = []
-    running_reward = 0
-    episode_count = 0
-    frame_count = 0
-    # Number of frames to take random action and observe output
-    epsilon_random_frames = 50000
-    # Number of frames for exploration
-    epsilon_greedy_frames = 1000000.0
-    # Maximum replay length
-    # Note: The Deepmind paper suggests 1000000 however this causes memory issues
-    max_memory_length = 100000
-    # Train the model after 4 actions
-    update_after_actions = 4
-    # How often to update the target network
-    update_target_network = 10000
-    # Using huber loss for stability
-    loss_function = keras.losses.Huber()
+    self.model_target = create_q_model()
+    self.model = create_q_model()
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
@@ -129,14 +77,69 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     :param new_game_state: The state the agent is in now.
     :param events: The events that occurred when going from  `old_game_state` to `new_game_state`
     """
+    self.frame_count += 1
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
-    # Idea: Add your own events to hand out rewards
-    # if ...:
-    #     events.append(PLACEHOLDER_EVENT)
+    if self.frame_count < self.epsilon_random_frames or self.epsilon > np.random.rand(1)[0]:
+        action = np.random.choice(num_actions)
+    else:
+        state_tensor = tf.convert_to_tensor(state_to_features(old_game_state))
+        state_tensor = tf.expand_dims(state_tensor, 0)
+        action_probs = self.model(state_tensor, training=False)
+        action = tf.argmax(action_probs[0]).numpy()
 
-    # state_to_features is defined in callbacks.py
-    self.transitions.append(Transition(state_to_features(old_game_state), self_action, state_to_features(new_game_state), reward_from_events(self, events)))
+    self.epsilon -= self.epsilon_interval / self.epsilon_greedy_frames
+    self.epsilon = max(self.epsilon, self.epsilon_min)
+
+    state_next = state_to_features(new_game_state)
+    state_next = np.array(state_next)
+
+    reward = reward_from_events(self, events)
+    self.episode_reward += reward
+
+    self.action_history.append(action)
+    self.state_history.append(state_to_features(old_game_state))
+    self.state_next_history.append(state_to_features(new_game_state))
+    done = 1 if new_game_state["step"] > 399 else 0
+    self.done_history.append(done)
+    self.rewards_history.append(reward)
+
+    if self.frame_count % self.update_after_actions == 0 and len(self.done_history) > self.batch_size:
+        indices = np.random.choice(range(len(self.done_history)), size=self.batch_size)
+        state_sample = np.array([self.state_hidzotx[i] for i in indices])
+        state_next_sample = np.array([self.state_next_history[i] for i in indices])
+        rewards_sample = np.array([self.rewards_history[i] for i in indices])
+        action_sample = np.array([self.action_history[i] for i in indices])
+        done_sample = tf.convert_to_tensor(
+            [float(self.done_history[i]) for i in indices]
+        )
+
+        future_rewards = self.model_target.predict(state_next_sample)
+
+        updated_q_values = rewards_sample * self.gamma * tf.reduce_max(future_rewards, axis=1)
+        updated_q_values = updated_q_values * (1 - done_sample) - done_sample
+
+        masks = tf.one_hot(action_sample, num_actions)
+
+        with tf.GradientTape() as tape:
+            q_values = self.model(state_sample)
+            q_action = tf.reduce_sum(tf.multiply(q_values, masks), axis=1)
+            loss = self.loss_function(updated_q_values)
+
+        grads = tape.gradient(loss, self.model.trainable_variables)
+        self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+
+        if self.frame_count % self.update_target_network == 0:
+            self.model.target.set_weights(self.model.get_weights())
+            message = "running reward {:.2f} at episode {}, frame_count {}]"
+            # print(message.format(running_reward, episode_count, self.frame_count))
+
+        if len(self.rewards_history) > self.max_memory_length:
+            del self.rewards_history[:-1]
+            del self.state_history[:-1]
+            del self.state_next_history[:-1]
+            del self.action_history[:-1]
+            del self.dopne_history[:-1]
 
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
@@ -153,11 +156,15 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     :param self: The same object that is passed to all of your callbacks.
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
-    self.transitions.append(Transition(state_to_features(last_game_state), last_action, None, reward_from_events(self, events)))
 
+    self.episode_reward_history.append(self.episode_reward)
+    if len(self.episode_reward_history) > 100:
+        del self.episode_reward_history[:1]
+    running_reward = np.mean(self.episode_reward_history)
     # Store the model
     with open("my-saved-model.pt", "wb") as file:
         pickle.dump(self.model, file)
+    self.episode_count += 1
 
 
 def reward_from_events(self, events: List[str]) -> int:
