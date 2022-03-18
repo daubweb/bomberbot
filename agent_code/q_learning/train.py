@@ -7,6 +7,11 @@ import keras
 from keras import layers
 from tensorflow import optimizers
 
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+
+
 import events as e
 from .callbacks import state_to_features
 
@@ -18,14 +23,33 @@ Transition = namedtuple('Transition',
 TRANSITION_HISTORY_SIZE = 3  # keep only ... last transitions
 RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 
-# Events
-PLACEHOLDER_EVENT = "PLACEHOLDER"
 
-seed = 42
-gamma = 0.99
-epsilon = 1.0
-epsilon_min = 0.1
-epsilon_max = 1.0
+optimizer = keras.optimizers.Adam(learning_rate=0.00025, clipnorm=1.0)
+
+# Experience replay buffers
+action_history = []
+state_history = []
+state_next_history = []
+rewards_history = []
+done_history = []
+episode_reward_history = []
+running_reward = 0
+episode_count = 0
+frame_count = 0
+# Number of frames to take random action and observe output
+epsilon_random_frames = 50000
+# Number of frames for exploration
+epsilon_greedy_frames = 1000000.0
+# Maximum replay length
+# Note: The Deepmind paper suggests 1000000 however this causes memory issues
+max_memory_length = 100000
+# Train the model after 4 actions
+update_after_actions = 4
+# How often to update the target network
+update_target_network = 10000
+# Using huber loss for stability
+loss_function = keras.losses.Huber()
+
 
 epsilon_interval = (epsilon_max - epsilon_min)
 batch_size = 32
@@ -58,10 +82,10 @@ def setup_training(self):
     # Example: Setup an array that will note transition tuples
     # (s, a, r, s')
     self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
-    model = create_model()
-    model_target = create_model()
+    self.model = create_model()
+    self.model_target = create_model()
 
-    optimizer = optimizers.Adam(learning_rate=0.00025, clipnorm=1.0)
+    self.optimizer = optimizers.Adam(learning_rate=0.00025, clipnorm=1.0)
 
     # Experience replay buffers
     action_history = []
@@ -144,7 +168,7 @@ def reward_from_events(self, events: List[str]) -> int:
     certain behavior.
     """
     game_rewards = {
-        e.COIN_COLLECTED: 1,
+        e.COIN_COLLECTED: 10,
         e.KILLED_OPPONENT: 50,
         e.INVALID_ACTION: -2,
         e.MOVED_LEFT: -1,
