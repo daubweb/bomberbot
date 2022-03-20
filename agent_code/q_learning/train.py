@@ -1,27 +1,23 @@
-import pickle
-from collections import namedtuple
+from .callbacks import state_to_features
 from typing import List
-
 import keras
 import numpy as np
+import tensorflow as tf
 from keras import layers
 from tensorflow import keras
-import tensorflow as tf
-
 import events as e
-from .callbacks import state_to_features
+
+num_dims = 1158
+
 
 # Experience replay buffers
-frame_count = 0
-episode_count = 0
-num_actions = 6
 
 
 def create_q_model(self):
-    inputs = layers.Input(shape=(1450, 1))
+    inputs = layers.Input(batch_input_shape=(1158,1))
     layer_1 = layers.Dense(250, activation="relu")(inputs)
     layer_2 = layers.Dense(10, activation="relu")(layer_1)
-    action = layers.Dense(num_actions, activation="linear")(layer_2)
+    action = layers.Dense(self.num_actions, activation="linear")(layer_2)
     return keras.Model(inputs=inputs, outputs=action)
 
 
@@ -49,41 +45,28 @@ def setup_training(self):
     self.epsilon_greedy_frames = 1000000.0
     self.max_memory_length = 100000
     self.update_after_actions = 4
-    self.update_target_network = 10000
+    self.update_target_network = 100
     self.loss_function = keras.losses.Huber()
 
     self.frame_count = 0
     self.episode_count = 0
     self.episode_reward = 0
+    self.num_actions = 6
 
-    self.model_target = create_q_model()
-    self.model = create_q_model()
+    self.model_target = create_q_model(self)
+    self.model = create_q_model(self)
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
-    """
-    Called once per step to allow intermediate rewards based on game events.
-
-    When this method is called, self.events will contain a list of all game
-    events relevant to your agent that occurred during the previous step. Consult
-    settings.py to see what events are tracked. You can hand out rewards to your
-    agent based on these events and your knowledge of the (new) game state.
-
-    This is *one* of the places where you could update your agent.
-
-    :param self: This object is passed to all callbacks and you can set arbitrary values.
-    :param old_game_state: The state that was passed to the last call of `act`.
-    :param self_action: The action that you took.
-    :param new_game_state: The state the agent is in now.
-    :param events: The events that occurred when going from  `old_game_state` to `new_game_state`
-    """
+    old_state_features = np.zeros(num_dims)
     self.frame_count += 1
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
     if self.frame_count < self.epsilon_random_frames or self.epsilon > np.random.rand(1)[0]:
-        action = np.random.choice(num_actions)
+        action = np.random.choice(self.num_actions)
     else:
-        state_tensor = tf.convert_to_tensor(state_to_features(old_game_state))
+        old_state_features = state_to_features(old_game_state)
+        state_tensor = tf.convert_to_tensor(old_state_features)
         state_tensor = tf.expand_dims(state_tensor, 0)
         action_probs = self.model(state_tensor, training=False)
         action = tf.argmax(action_probs[0]).numpy()
@@ -92,45 +75,42 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     self.epsilon = max(self.epsilon, self.epsilon_min)
 
     state_next = state_to_features(new_game_state)
-    state_next = np.array(state_next)
-
     reward = reward_from_events(self, events)
-    self.episode_reward += reward
 
+    self.episode_reward += reward
     self.action_history.append(action)
-    self.state_history.append(state_to_features(old_game_state))
-    self.state_next_history.append(state_to_features(new_game_state))
+    self.state_history.append(old_state_features)
+    self.state_next_history.append(state_next)
+
     done = 1 if new_game_state["step"] > 399 else 0
     self.done_history.append(done)
     self.rewards_history.append(reward)
 
     if self.frame_count % self.update_after_actions == 0 and len(self.done_history) > self.batch_size:
         indices = np.random.choice(range(len(self.done_history)), size=self.batch_size)
-        state_sample = np.array([self.state_hidzotx[i] for i in indices])
-        state_next_sample = np.array([self.state_next_history[i] for i in indices])
-        rewards_sample = np.array([self.rewards_history[i] for i in indices])
+        state_sample = (self.state_history[i] for i in indices)
+        state_next_sample = (self.state_next_history[i] for i in indices)
+        rewards_sample = [self.rewards_history[i] for i in indices]
         action_sample = np.array([self.action_history[i] for i in indices])
         done_sample = tf.convert_to_tensor(
             [float(self.done_history[i]) for i in indices]
-        )
-
-        future_rewards = self.model_target.predict(state_next_sample)
-
-        updated_q_values = rewards_sample * self.gamma * tf.reduce_max(future_rewards, axis=1)
+        )  # print(dims)
+        future_rewards = self.model_target.predict(tuple(state_next_sample))
+        updated_q_values = rewards_sample * self.gamma * tf.reduce_max(future_rewards, axis=2)
         updated_q_values = updated_q_values * (1 - done_sample) - done_sample
 
-        masks = tf.one_hot(action_sample, num_actions)
+        masks = tf.one_hot(action_sample, self.num_actions)
 
         with tf.GradientTape() as tape:
-            q_values = self.model(state_sample)
+            q_values = self.model(tf.expand_dims(np.array(state_sample), 0))
             q_action = tf.reduce_sum(tf.multiply(q_values, masks), axis=1)
-            loss = self.loss_function(updated_q_values)
+            loss = self.loss_function(updated_q_values, tf.transpose(q_action))
 
         grads = tape.gradient(loss, self.model.trainable_variables)
         self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
 
         if self.frame_count % self.update_target_network == 0:
-            self.model.target.set_weights(self.model.get_weights())
+            self.model_target.set_weights(self.model.get_weights())
             message = "running reward {:.2f} at episode {}, frame_count {}]"
             # print(message.format(running_reward, episode_count, self.frame_count))
 
@@ -139,41 +119,23 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             del self.state_history[:-1]
             del self.state_next_history[:-1]
             del self.action_history[:-1]
-            del self.dopne_history[:-1]
+            del self.done_history[:-1]
 
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
-    """
-    Called at the end of each game or when the agent died to hand out final rewards.
-    This replaces game_events_occurred in this round.
-
-    This is similar to game_events_occurred. self.events will contain all events that
-    occurred during your agent's final step.
-
-    This is *one* of the places where you could update your agent.
-    This is also a good place to store an agent that you updated.
-
-    :param self: The same object that is passed to all of your callbacks.
-    """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
-
     self.episode_reward_history.append(self.episode_reward)
+    self.episode_reward = 0
     if len(self.episode_reward_history) > 100:
         del self.episode_reward_history[:1]
-    running_reward = np.mean(self.episode_reward_history)
+    self.running_reward = np.mean(self.episode_reward_history)
+    print(self.running_reward)
     # Store the model
-    with open("my-saved-model.pt", "wb") as file:
-        pickle.dump(self.model, file)
+    # @Todo Save Current Model State here!
     self.episode_count += 1
 
 
 def reward_from_events(self, events: List[str]) -> int:
-    """
-    *This is not a required function, but an idea to structure your code.*
-
-    Here you can modify the rewards your agent get so as to en/discourage
-    certain behavior.
-    """
     game_rewards = {
         e.COIN_COLLECTED: 10,
         e.KILLED_OPPONENT: 50,
