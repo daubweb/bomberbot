@@ -14,9 +14,9 @@ num_dims = 1158
 
 
 def create_q_model(self):
-    inputs = layers.Input(batch_input_shape=(1158,1))
-    layer_1 = layers.Dense(250, activation="relu")(inputs)
-    layer_2 = layers.Dense(10, activation="relu")(layer_1)
+    inputs = layers.Input(shape=(1158,))
+    layer_1 = layers.Dense(250, activation="relu")(inputs) # Breiter machen (2000 / 4000)
+    layer_2 = layers.Dense(10, activation="relu")(layer_1) # Größer machen ( 2000 / 4000)
     action = layers.Dense(self.num_actions, activation="linear")(layer_2)
     return keras.Model(inputs=inputs, outputs=action)
 
@@ -88,21 +88,21 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     if self.frame_count % self.update_after_actions == 0 and len(self.done_history) > self.batch_size:
         indices = np.random.choice(range(len(self.done_history)), size=self.batch_size)
-        state_sample = (self.state_history[i] for i in indices)
-        state_next_sample = (self.state_next_history[i] for i in indices)
+        state_sample = np.array([self.state_history[i] for i in indices])
+        state_next_sample = np.array([self.state_next_history[i] for i in indices])
         rewards_sample = [self.rewards_history[i] for i in indices]
         action_sample = np.array([self.action_history[i] for i in indices])
         done_sample = tf.convert_to_tensor(
             [float(self.done_history[i]) for i in indices]
         )  # print(dims)
-        future_rewards = self.model_target.predict(tuple(state_next_sample))
-        updated_q_values = rewards_sample * self.gamma * tf.reduce_max(future_rewards, axis=2)
+        future_rewards = self.model_target.predict(state_next_sample)
+        updated_q_values = rewards_sample + self.gamma * tf.reduce_max(future_rewards, axis=1)
         updated_q_values = updated_q_values * (1 - done_sample) - done_sample
 
         masks = tf.one_hot(action_sample, self.num_actions)
 
         with tf.GradientTape() as tape:
-            q_values = self.model(tf.expand_dims(np.array(state_sample), 0))
+            q_values = self.model(state_sample)
             q_action = tf.reduce_sum(tf.multiply(q_values, masks), axis=1)
             loss = self.loss_function(updated_q_values, tf.transpose(q_action))
 
@@ -131,7 +131,8 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     self.running_reward = np.mean(self.episode_reward_history)
     print(self.running_reward)
     # Store the model
-    # @Todo Save Current Model State here!
+    self.model_target.save("target_model")
+    self.model.save("model")
     self.episode_count += 1
 
 
@@ -140,10 +141,10 @@ def reward_from_events(self, events: List[str]) -> int:
         e.COIN_COLLECTED: 10,
         e.KILLED_OPPONENT: 50,
         e.INVALID_ACTION: -2,
-        e.MOVED_LEFT: -1,
-        e.MOVED_UP: -1,
-        e.MOVED_RIGHT: -1,
-        e.MOVED_DOWN: -1,
+        e.MOVED_LEFT: 1,
+        e.MOVED_UP: 1,
+        e.MOVED_RIGHT: 1,
+        e.MOVED_DOWN: 1,
         e.CRATE_DESTROYED: 2,
         e.KILLED_SELF: -100,
         e.GOT_KILLED: -100
