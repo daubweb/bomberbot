@@ -9,11 +9,11 @@ epsilon = 0.1
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 lastSavedEpoch = 0
-load_from_file = True
+load_from_file = False
 
 def setup(self):
     #                       5 features, taken Action, reward
-    self.q_lookup_table = np.zeros((3, 3, 3, 3, 3, 50, 50))
+    self.q_lookup_table = np.zeros((3, 3, 3, 3, 3, 50, 50, 8, 8))
     counter = 1
     for i in range(0, 3):
         for j in range(0, 3):
@@ -22,8 +22,10 @@ def setup(self):
                     for m in range(0, 3):
                         for n in range(0, 50):
                             for o in range(0, 50):
-                                self.q_lookup_table[i, j, k, l, m, n, o] = counter
-                                counter += 1
+                                for p in range(0, 8):
+                                    for q in range(0, 8):
+                                        self.q_lookup_table[i, j, k, l, m, n, o, p, q] = counter
+                                        counter += 1
     if load_from_file:
         self.q_table = np.load("q_table_integers.npy")
     else:
@@ -63,10 +65,27 @@ def state_to_features(self, game_state: dict) -> np.array:
             nearestCoinY = coinY
     nearestCoinRelativeX = x - nearestCoinX + 25
     nearestCoinRelativeY = y - nearestCoinY + 25
+    bombs = game_state["bombs"]
+    minDistance = 1000
+    minBombX = 7
+    minBombY = 7
+    for position, countdown in bombs:
+        bombX, bombY = position
+        distance = (x-bombX)**2 + (y-bombY)**2
+        if distance < minDistance:
+            minBombX = bombX
+            minBombY = bombY
+            minDistance = distance
+    if np.abs(minBombX) > 3:
+        minBombX = 3 * (minBombX / np.abs(minBombX))
+    if np.abs(minBombY) > 3:
+        minBombY = 3 * (minBombY / np.abs(minBombY))
+    minBombX = 3 + int(minBombX)
+    minBombY = 3 + int(minBombY)
     """if np.abs(nearestCoinRelativeX) > 10:
         nearestCoinRelativeX = int(10 * nearestCoinRelativeX / np.abs(nearestCoinRelativeX))
     if np.abs(nearestCoinRelativeY) > 10:
         nearestCoinRelativeY = int(10 * nearestCoinRelativeY / np.abs(nearestCoinRelativeY))
     """
-    state_integer = self.q_lookup_table[leftOfMe, onTopOfMe, rightOfMe, belowMe, atMyPosition, nearestCoinRelativeX, nearestCoinRelativeY]
+    state_integer = self.q_lookup_table[leftOfMe, onTopOfMe, rightOfMe, belowMe, atMyPosition, nearestCoinRelativeX, nearestCoinRelativeY, minBombX, minBombY]
     return int(state_integer)
