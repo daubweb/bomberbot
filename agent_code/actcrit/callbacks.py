@@ -3,7 +3,7 @@ import pickle
 import random
 
 import numpy as np
-from tensorflow import keras
+
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
@@ -22,7 +22,6 @@ def setup(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-
     if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
         weights = np.random.rand(len(ACTIONS))
@@ -32,7 +31,6 @@ def setup(self):
         with open("my-saved-model.pt", "rb") as file:
             self.model = pickle.load(file)
 
-    self.model = keras.models.load_model("my_model")
 
 def act(self, game_state: dict) -> str:
     """
@@ -43,20 +41,15 @@ def act(self, game_state: dict) -> str:
     :param game_state: The dictionary that describes everything on the board.
     :return: The action to take as a string.
     """
-    features = state_to_features(game_state)
-    # print(features)
     # todo Exploration vs exploitation
     random_prob = .1
     if self.train and random.random() < random_prob:
         self.logger.debug("Choosing action purely at random.")
         # 80%: walk in any direction. 10% wait. 10% bomb.
         return np.random.choice(ACTIONS, p=[.2, .2, .2, .2, .1, .1])
-    else:
-        test_input = np.random.random((1,32))
-
 
     self.logger.debug("Querying model for action.")
-    return ACTIONS[np.argmax(self.model.predict(test_input).flatten())]
+    return np.random.choice(ACTIONS, p=self.model)
 
 
 def state_to_features(game_state: dict) -> np.array:
@@ -74,15 +67,11 @@ def state_to_features(game_state: dict) -> np.array:
     :return: np.array
     """
     # This is the dict before the game begins and after it ends
-    coin_array = np.array(game_state["coins"])
-
     if game_state is None:
         return None
 
     # For example, you could construct several channels of equal shape, ...
-    channels = [
-
-    ]
+    channels = []
     channels.append(...)
     # concatenate them as a feature tensor (they must have the same shape), ...
     stacked_channels = np.stack(channels)

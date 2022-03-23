@@ -9,6 +9,7 @@ keras = "*"
 tensorflow = "*"
 matplotlib = "*"
 jupyterlab = "*"
+keras-rl = "*"
 
 [dev-packages]
 
