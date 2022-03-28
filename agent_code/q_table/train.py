@@ -91,6 +91,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             reward -= 5
             break
 
+    #Q - Tabl
+
     old_value = self.q_table[state, ACTIONS.index(self_action)]
     next_max = np.max(self.q_table[next_state])
 
