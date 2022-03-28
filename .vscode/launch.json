@@ -11,7 +11,7 @@
             "program": "main.py",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "args": ["play", "--no-gui", "--agents", "q_table", "--train", "2", "--scenario", "coin-heaven", "--n-rounds", "10000"]
+            "args": ["play", "--no-gui", "--agents", "da_bomb", "--train", "2", "--scenario", "coin-heaven", "--n-rounds", "10000"]
         }
     ]
 }
